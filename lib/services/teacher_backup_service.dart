@@ -50,17 +50,21 @@ class ExcelTeacherBackupService implements TeacherBackupService {
       xl.TextCellValue('Full Name'),
       xl.TextCellValue('First Name'),
       xl.TextCellValue('Last Name'),
-      xl.TextCellValue('Present Sessions'),
-      xl.TextCellValue('Absent Sessions'),
-      xl.TextCellValue('Late Sessions'),
-      xl.TextCellValue('Holiday Sessions'),
+      xl.TextCellValue('Number of Days Present'),
+      xl.TextCellValue('Number of Days Absent'),
+      xl.TextCellValue('Number of Days Late'),
+      xl.TextCellValue('Number of Holidays'),
+      xl.TextCellValue('Present Dates'),
+      xl.TextCellValue('Absent Dates'),
+      xl.TextCellValue('Late Dates'),
+      xl.TextCellValue('Holiday Dates'),
+      xl.TextCellValue('Logged Entries'),
       xl.TextCellValue('Morning Sessions Logged'),
       xl.TextCellValue('Afternoon Sessions Logged'),
       xl.TextCellValue('Present Session Log'),
       xl.TextCellValue('Absent Session Log'),
       xl.TextCellValue('Late Session Log'),
       xl.TextCellValue('Holiday Session Log'),
-      xl.TextCellValue('Logged Sessions'),
     ]);
 
     for (final teacher in teachers) {
@@ -72,17 +76,33 @@ class ExcelTeacherBackupService implements TeacherBackupService {
         xl.IntCellValue(teacher.absentDays),
         xl.IntCellValue(teacher.lateDays),
         xl.IntCellValue(teacher.holidayDays),
+        xl.TextCellValue(
+          _formatEntriesForStatus(teacher, AttendanceStatus.present),
+        ),
+        xl.TextCellValue(
+          _formatEntriesForStatus(teacher, AttendanceStatus.absent),
+        ),
+        xl.TextCellValue(
+          _formatEntriesForStatus(teacher, AttendanceStatus.late),
+        ),
+        xl.TextCellValue(
+          _formatEntriesForStatus(teacher, AttendanceStatus.holiday),
+        ),
+        xl.IntCellValue(teacher.entries.length),
         xl.IntCellValue(teacher.morningSessions),
         xl.IntCellValue(teacher.afternoonSessions),
         xl.TextCellValue(
-            _formatEntriesForStatus(teacher, AttendanceStatus.present)),
+          _formatEntriesForStatus(teacher, AttendanceStatus.present),
+        ),
         xl.TextCellValue(
-            _formatEntriesForStatus(teacher, AttendanceStatus.absent)),
+          _formatEntriesForStatus(teacher, AttendanceStatus.absent),
+        ),
         xl.TextCellValue(
-            _formatEntriesForStatus(teacher, AttendanceStatus.late)),
+          _formatEntriesForStatus(teacher, AttendanceStatus.late),
+        ),
         xl.TextCellValue(
-            _formatEntriesForStatus(teacher, AttendanceStatus.holiday)),
-        xl.IntCellValue(teacher.entries.length),
+          _formatEntriesForStatus(teacher, AttendanceStatus.holiday),
+        ),
       ]);
     }
 
