@@ -3,6 +3,8 @@ import 'dart:typed_data';
 
 import 'package:excel/excel.dart' as xl;
 
+import '../models/attendance_entry.dart';
+import '../models/attendance_session.dart';
 import '../models/attendance_status.dart';
 import '../models/teacher_record.dart';
 import '../utils/attendance_date_utils.dart';
@@ -24,41 +26,45 @@ class ExcelTeacherBackupService implements TeacherBackupService {
     List<TeacherRecord> teachers, {
     required DateTime createdAt,
   }) {
-    const sheetName = 'Teacher Attendance';
+    const summarySheetName = 'Teacher Attendance';
+    const logSheetName = 'Session Log';
     final workbook = xl.Excel.createExcel();
     final defaultSheetName = workbook.getDefaultSheet();
 
-    if (defaultSheetName != null && defaultSheetName != sheetName) {
-      workbook.rename(defaultSheetName, sheetName);
+    if (defaultSheetName != null && defaultSheetName != summarySheetName) {
+      workbook.rename(defaultSheetName, summarySheetName);
     }
 
-    final sheet = workbook[sheetName];
+    final summarySheet = workbook[summarySheetName];
+    final logSheet = workbook[logSheetName];
 
-    sheet.appendRow(<xl.CellValue>[
-      xl.TextCellValue(sheetName),
+    summarySheet.appendRow(<xl.CellValue>[
+      xl.TextCellValue(summarySheetName),
     ]);
-    sheet.appendRow(<xl.CellValue>[
+    summarySheet.appendRow(<xl.CellValue>[
       xl.TextCellValue('Created At'),
       xl.TextCellValue(formatDateTimeForSheet(createdAt)),
     ]);
-    sheet.appendRow(const <xl.CellValue>[]);
-    sheet.appendRow(<xl.CellValue>[
+    summarySheet.appendRow(const <xl.CellValue>[]);
+    summarySheet.appendRow(<xl.CellValue>[
       xl.TextCellValue('Full Name'),
       xl.TextCellValue('First Name'),
       xl.TextCellValue('Last Name'),
-      xl.TextCellValue('Number of Days Present'),
-      xl.TextCellValue('Number of Days Absent'),
-      xl.TextCellValue('Number of Days Late'),
-      xl.TextCellValue('Number of Holidays'),
-      xl.TextCellValue('Present Dates'),
-      xl.TextCellValue('Absent Dates'),
-      xl.TextCellValue('Late Dates'),
-      xl.TextCellValue('Holiday Dates'),
-      xl.TextCellValue('Logged Entries'),
+      xl.TextCellValue('Present Sessions'),
+      xl.TextCellValue('Absent Sessions'),
+      xl.TextCellValue('Late Sessions'),
+      xl.TextCellValue('Holiday Sessions'),
+      xl.TextCellValue('Morning Sessions Logged'),
+      xl.TextCellValue('Afternoon Sessions Logged'),
+      xl.TextCellValue('Present Session Log'),
+      xl.TextCellValue('Absent Session Log'),
+      xl.TextCellValue('Late Session Log'),
+      xl.TextCellValue('Holiday Session Log'),
+      xl.TextCellValue('Logged Sessions'),
     ]);
 
     for (final teacher in teachers) {
-      sheet.appendRow(<xl.CellValue>[
+      summarySheet.appendRow(<xl.CellValue>[
         xl.TextCellValue(teacher.fullName),
         xl.TextCellValue(teacher.firstName),
         xl.TextCellValue(teacher.lastName),
@@ -66,12 +72,48 @@ class ExcelTeacherBackupService implements TeacherBackupService {
         xl.IntCellValue(teacher.absentDays),
         xl.IntCellValue(teacher.lateDays),
         xl.IntCellValue(teacher.holidayDays),
-        xl.TextCellValue(_formatDatesForStatus(teacher, AttendanceStatus.present)),
-        xl.TextCellValue(_formatDatesForStatus(teacher, AttendanceStatus.absent)),
-        xl.TextCellValue(_formatDatesForStatus(teacher, AttendanceStatus.late)),
-        xl.TextCellValue(_formatDatesForStatus(teacher, AttendanceStatus.holiday)),
+        xl.IntCellValue(teacher.morningSessions),
+        xl.IntCellValue(teacher.afternoonSessions),
+        xl.TextCellValue(
+            _formatEntriesForStatus(teacher, AttendanceStatus.present)),
+        xl.TextCellValue(
+            _formatEntriesForStatus(teacher, AttendanceStatus.absent)),
+        xl.TextCellValue(
+            _formatEntriesForStatus(teacher, AttendanceStatus.late)),
+        xl.TextCellValue(
+            _formatEntriesForStatus(teacher, AttendanceStatus.holiday)),
         xl.IntCellValue(teacher.entries.length),
       ]);
+    }
+
+    logSheet.appendRow(<xl.CellValue>[
+      xl.TextCellValue(logSheetName),
+    ]);
+    logSheet.appendRow(<xl.CellValue>[
+      xl.TextCellValue('Created At'),
+      xl.TextCellValue(formatDateTimeForSheet(createdAt)),
+    ]);
+    logSheet.appendRow(const <xl.CellValue>[]);
+    logSheet.appendRow(<xl.CellValue>[
+      xl.TextCellValue('Full Name'),
+      xl.TextCellValue('First Name'),
+      xl.TextCellValue('Last Name'),
+      xl.TextCellValue('Date'),
+      xl.TextCellValue('Session'),
+      xl.TextCellValue('Status'),
+    ]);
+
+    for (final teacher in teachers) {
+      for (final entry in teacher.sortedEntries) {
+        logSheet.appendRow(<xl.CellValue>[
+          xl.TextCellValue(teacher.fullName),
+          xl.TextCellValue(teacher.firstName),
+          xl.TextCellValue(teacher.lastName),
+          xl.TextCellValue(formatDate(entry.date)),
+          xl.TextCellValue(entry.session.label),
+          xl.TextCellValue(entry.status.label),
+        ]);
+      }
     }
 
     final bytes = workbook.encode();
@@ -88,7 +130,8 @@ class ExcelTeacherBackupService implements TeacherBackupService {
   }
 
   @override
-  Future<File> writeTemporaryBackupFile(String fileName, Uint8List bytes) async {
+  Future<File> writeTemporaryBackupFile(
+      String fileName, Uint8List bytes) async {
     final safePrefix = fileName.replaceAll('.xlsx', '');
     final tempDirectory = await Directory.systemTemp.createTemp(
       'teacher_attendance_$safePrefix',
@@ -101,33 +144,28 @@ class ExcelTeacherBackupService implements TeacherBackupService {
   }
 }
 
-String _formatDatesForStatus(TeacherRecord teacher, AttendanceStatus status) {
-  final dates = teacher.entries
+String _formatEntriesForStatus(TeacherRecord teacher, AttendanceStatus status) {
+  final matchingEntries = teacher.entries
       .where((entry) => entry.status == status)
-      .map((entry) => DateTime(entry.date.year, entry.date.month, entry.date.day))
       .toList()
-    ..sort((left, right) => left.compareTo(right));
+    ..sort(_compareEntriesAscending);
 
-  if (dates.isEmpty) {
+  if (matchingEntries.isEmpty) {
     return '';
   }
 
-  final ranges = <String>[];
-  var rangeStart = dates.first;
-  var rangeEnd = dates.first;
+  return matchingEntries
+      .map(
+        (entry) => '${formatDate(entry.date)} (${entry.session.label})',
+      )
+      .join('\n');
+}
 
-  for (final date in dates.skip(1)) {
-    final expectedNextDay = rangeEnd.add(const Duration(days: 1));
-    if (isSameDate(date, expectedNextDay)) {
-      rangeEnd = date;
-      continue;
-    }
-
-    ranges.add(formatDateRange(rangeStart, rangeEnd));
-    rangeStart = date;
-    rangeEnd = date;
+int _compareEntriesAscending(AttendanceEntry left, AttendanceEntry right) {
+  final dayCompare = left.dayKey.compareTo(right.dayKey);
+  if (dayCompare != 0) {
+    return dayCompare;
   }
 
-  ranges.add(formatDateRange(rangeStart, rangeEnd));
-  return ranges.join('\n');
+  return left.session.sortOrder.compareTo(right.session.sortOrder);
 }

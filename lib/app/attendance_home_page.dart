@@ -6,6 +6,7 @@ import 'package:flutter/rendering.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../models/attendance_entry.dart';
+import '../models/attendance_session.dart';
 import '../models/attendance_status.dart';
 import '../models/teacher_name_draft.dart';
 import '../models/teacher_record.dart';
@@ -133,7 +134,8 @@ class _AttendanceHomePageState extends State<AttendanceHomePage> {
     int teacherIndex, {
     required AttendanceStatus status,
     required DateTime date,
-    String? originalDayKey,
+    required AttendanceSession session,
+    AttendanceEntry? originalEntry,
   }) async {
     final teacher = _teachers[teacherIndex];
 
@@ -141,19 +143,25 @@ class _AttendanceHomePageState extends State<AttendanceHomePage> {
       _teachers[teacherIndex] = teacher.saveEntry(
         status: status,
         date: date,
-        originalDayKey: originalDayKey,
+        session: session,
+        originalEntry: originalEntry,
       );
     });
 
     await _saveTeachers();
-    _showMessage('${status.label} saved for ${formatDate(date)}.');
+    _showMessage(
+      '${session.label} ${status.label.toLowerCase()} saved for ${formatDate(date)}.',
+    );
   }
 
-  Future<void> _removeAttendanceEntry(int teacherIndex, String dayKey) async {
+  Future<void> _removeAttendanceEntry(
+    int teacherIndex,
+    AttendanceEntry entry,
+  ) async {
     final teacher = _teachers[teacherIndex];
 
     setState(() {
-      _teachers[teacherIndex] = teacher.removeEntry(dayKey);
+      _teachers[teacherIndex] = teacher.removeEntry(entry);
     });
 
     await _saveTeachers();
@@ -165,6 +173,8 @@ class _AttendanceHomePageState extends State<AttendanceHomePage> {
     AttendanceEntry? existingEntry,
   }) async {
     DateTime selectedDate = existingEntry?.date ?? DateTime.now();
+    AttendanceSession selectedSession =
+        existingEntry?.session ?? AttendanceSession.morning;
     AttendanceStatus selectedStatus =
         existingEntry?.status ?? AttendanceStatus.present;
     AttendanceDialogAction? action;
@@ -206,6 +216,28 @@ class _AttendanceHomePageState extends State<AttendanceHomePage> {
                     },
                     icon: const Icon(Icons.calendar_today_outlined),
                     label: Text(formatDate(selectedDate)),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Session',
+                    style: Theme.of(context).textTheme.labelLarge,
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: AttendanceSession.values.map((session) {
+                      final isSelected = session == selectedSession;
+                      return ChoiceChip(
+                        selected: isSelected,
+                        label: Text(session.label),
+                        onSelected: (_) {
+                          setDialogState(() {
+                            selectedSession = session;
+                          });
+                        },
+                      );
+                    }).toList(growable: false),
                   ),
                   const SizedBox(height: 16),
                   Text(
@@ -264,7 +296,7 @@ class _AttendanceHomePageState extends State<AttendanceHomePage> {
     }
 
     if (action == AttendanceDialogAction.delete && existingEntry != null) {
-      await _removeAttendanceEntry(teacherIndex, existingEntry.dayKey);
+      await _removeAttendanceEntry(teacherIndex, existingEntry);
       return;
     }
 
@@ -272,24 +304,39 @@ class _AttendanceHomePageState extends State<AttendanceHomePage> {
       teacherIndex,
       status: selectedStatus,
       date: selectedDate,
-      originalDayKey: existingEntry?.dayKey,
+      session: selectedSession,
+      originalEntry: existingEntry,
     );
   }
 
-  Future<void> _logToday(int teacherIndex, AttendanceStatus status) async {
+  Future<void> _logToday(
+    int teacherIndex,
+    AttendanceSession session,
+    AttendanceStatus status,
+  ) async {
     final teacher = _teachers[teacherIndex];
     final today = DateTime.now();
-    final todayKey = dateKey(today);
-    final existingEntry = teacher.entries
-        .cast<AttendanceEntry?>()
-        .firstWhere((entry) => entry?.dayKey == todayKey, orElse: () => null);
+    final existingEntry = _entryForDateAndSession(teacher, today, session);
 
     await _saveAttendanceEntry(
       teacherIndex,
       status: status,
       date: today,
-      originalDayKey: existingEntry?.dayKey,
+      session: session,
+      originalEntry: existingEntry,
     );
+  }
+
+  AttendanceEntry? _entryForDateAndSession(
+    TeacherRecord teacher,
+    DateTime date,
+    AttendanceSession session,
+  ) {
+    final dayKey = dateKey(date);
+    return teacher.entries.cast<AttendanceEntry?>().firstWhere(
+          (entry) => entry?.dayKey == dayKey && entry?.session == session,
+          orElse: () => null,
+        );
   }
 
   Future<void> _removeTeacher(int index) async {
@@ -549,14 +596,16 @@ class _AttendanceHomePageState extends State<AttendanceHomePage> {
                                 ? const Color(0xFFCEE5D4)
                                 : const Color(0xFFB8D5C0),
                             onLogAttendance: () => _openAttendanceDialog(index),
-                            onPresent: () =>
-                                _logToday(index, AttendanceStatus.present),
-                            onAbsent: () =>
-                                _logToday(index, AttendanceStatus.absent),
-                            onLate: () =>
-                                _logToday(index, AttendanceStatus.late),
-                            onHoliday: () =>
-                                _logToday(index, AttendanceStatus.holiday),
+                            onLogMorningToday: (status) => _logToday(
+                              index,
+                              AttendanceSession.morning,
+                              status,
+                            ),
+                            onLogAfternoonToday: (status) => _logToday(
+                              index,
+                              AttendanceSession.afternoon,
+                              status,
+                            ),
                             onEditTeacher: () => _editTeacherName(index),
                             onEditEntry: (entry) => _openAttendanceDialog(
                               index,

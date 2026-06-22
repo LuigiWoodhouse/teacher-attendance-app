@@ -1,6 +1,6 @@
 import 'attendance_entry.dart';
+import 'attendance_session.dart';
 import 'attendance_status.dart';
-import '../utils/attendance_date_utils.dart';
 
 class TeacherRecord {
   const TeacherRecord({
@@ -41,15 +41,34 @@ class TeacherRecord {
 
   bool get hasLegacyTotals =>
       legacyPresentDays +
-              legacyAbsentDays +
-              legacyLateDays +
-              legacyHolidayDays >
-          0;
+          legacyAbsentDays +
+          legacyLateDays +
+          legacyHolidayDays >
+      0;
 
   List<AttendanceEntry> get sortedEntries {
     final sorted = List<AttendanceEntry>.from(entries)
-      ..sort((left, right) => right.dayKey.compareTo(left.dayKey));
+      ..sort(_compareEntriesDescending);
     return sorted;
+  }
+
+  int get morningSessions => entries
+      .where((entry) => entry.session == AttendanceSession.morning)
+      .length;
+
+  int get afternoonSessions => entries
+      .where((entry) => entry.session == AttendanceSession.afternoon)
+      .length;
+
+  int countForSessionAndStatus(
+    AttendanceSession session,
+    AttendanceStatus status,
+  ) {
+    return entries
+        .where(
+          (entry) => entry.session == session && entry.status == status,
+        )
+        .length;
   }
 
   TeacherRecord copyWith({
@@ -75,32 +94,41 @@ class TeacherRecord {
   TeacherRecord saveEntry({
     required AttendanceStatus status,
     required DateTime date,
-    String? originalDayKey,
+    required AttendanceSession session,
+    AttendanceEntry? originalEntry,
   }) {
     final nextEntries = List<AttendanceEntry>.from(entries);
-    final newDayKey = dateKey(date);
+    final newEntry = AttendanceEntry(
+      dayKey: _dateKey(date),
+      session: session,
+      status: status,
+    );
 
-    if (originalDayKey != null) {
-      nextEntries.removeWhere((entry) => entry.dayKey == originalDayKey);
+    if (originalEntry != null) {
+      nextEntries.removeWhere(
+        (entry) => entry.entryKey == originalEntry.entryKey,
+      );
     }
 
-    final existingIndex =
-        nextEntries.indexWhere((entry) => entry.dayKey == newDayKey);
-    final nextEntry = AttendanceEntry(dayKey: newDayKey, status: status);
+    final existingIndex = nextEntries.indexWhere(
+      (entry) => entry.entryKey == newEntry.entryKey,
+    );
 
     if (existingIndex >= 0) {
-      nextEntries[existingIndex] = nextEntry;
+      nextEntries[existingIndex] = newEntry;
     } else {
-      nextEntries.add(nextEntry);
+      nextEntries.add(newEntry);
     }
 
-    nextEntries.sort((left, right) => right.dayKey.compareTo(left.dayKey));
+    nextEntries.sort(_compareEntriesDescending);
     return copyWith(entries: nextEntries);
   }
 
-  TeacherRecord removeEntry(String dayKey) {
+  TeacherRecord removeEntry(AttendanceEntry entryToRemove) {
     return copyWith(
-      entries: entries.where((entry) => entry.dayKey != dayKey).toList(),
+      entries: entries
+          .where((entry) => entry.entryKey != entryToRemove.entryKey)
+          .toList(),
     );
   }
 
@@ -135,4 +163,21 @@ class TeacherRecord {
           .toList(growable: false),
     );
   }
+}
+
+int _compareEntriesDescending(AttendanceEntry left, AttendanceEntry right) {
+  final dayCompare = right.dayKey.compareTo(left.dayKey);
+  if (dayCompare != 0) {
+    return dayCompare;
+  }
+
+  return right.session.sortOrder.compareTo(left.session.sortOrder);
+}
+
+String _dateKey(DateTime date) {
+  final normalized = DateTime(date.year, date.month, date.day);
+  final year = normalized.year.toString().padLeft(4, '0');
+  final month = normalized.month.toString().padLeft(2, '0');
+  final day = normalized.day.toString().padLeft(2, '0');
+  return '$year-$month-$day';
 }

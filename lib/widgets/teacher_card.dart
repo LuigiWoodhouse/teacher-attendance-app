@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/attendance_entry.dart';
+import '../models/attendance_session.dart';
 import '../models/attendance_status.dart';
 import '../models/teacher_record.dart';
 import '../utils/attendance_date_utils.dart';
@@ -12,10 +13,8 @@ class TeacherCard extends StatefulWidget {
     required this.backgroundColor,
     required this.outlineColor,
     required this.onLogAttendance,
-    required this.onPresent,
-    required this.onAbsent,
-    required this.onLate,
-    required this.onHoliday,
+    required this.onLogMorningToday,
+    required this.onLogAfternoonToday,
     required this.onEditTeacher,
     required this.onEditEntry,
     required this.onDelete,
@@ -25,10 +24,8 @@ class TeacherCard extends StatefulWidget {
   final Color backgroundColor;
   final Color outlineColor;
   final VoidCallback onLogAttendance;
-  final VoidCallback onPresent;
-  final VoidCallback onAbsent;
-  final VoidCallback onLate;
-  final VoidCallback onHoliday;
+  final ValueChanged<AttendanceStatus> onLogMorningToday;
+  final ValueChanged<AttendanceStatus> onLogAfternoonToday;
   final VoidCallback onEditTeacher;
   final ValueChanged<AttendanceEntry> onEditEntry;
   final VoidCallback onDelete;
@@ -46,10 +43,9 @@ class _TeacherCardState extends State<TeacherCard> {
   Widget build(BuildContext context) {
     final allHistory = widget.teacher.sortedEntries;
     final hasHiddenHistory = allHistory.length > _collapsedHistoryCount;
-    final history =
-        _showAllHistory
-            ? allHistory
-            : allHistory.take(_collapsedHistoryCount).toList(growable: false);
+    final history = _showAllHistory
+        ? allHistory
+        : allHistory.take(_collapsedHistoryCount).toList(growable: false);
     final hiddenHistoryCount = allHistory.length - history.length;
 
     return Container(
@@ -119,27 +115,19 @@ class _TeacherCardState extends State<TeacherCard> {
               FilledButton.icon(
                 onPressed: widget.onLogAttendance,
                 icon: const Icon(Icons.calendar_month_outlined),
-                label: const Text('Log a day'),
+                label: const Text('Log a session'),
               ),
-              OutlinedButton.icon(
-                onPressed: widget.onPresent,
-                icon: const Icon(Icons.check_circle_outline),
-                label: const Text('Present today'),
+              _QuickLogMenuButton(
+                label: 'Morning today',
+                icon: Icons.wb_sunny_outlined,
+                session: AttendanceSession.morning,
+                onSelected: widget.onLogMorningToday,
               ),
-              OutlinedButton.icon(
-                onPressed: widget.onLate,
-                icon: const Icon(Icons.schedule),
-                label: const Text('Late today'),
-              ),
-              OutlinedButton.icon(
-                onPressed: widget.onAbsent,
-                icon: const Icon(Icons.highlight_off),
-                label: const Text('Absent today'),
-              ),
-              OutlinedButton.icon(
-                onPressed: widget.onHoliday,
-                icon: const Icon(Icons.beach_access_outlined),
-                label: const Text('Holiday today'),
+              _QuickLogMenuButton(
+                label: 'Afternoon today',
+                icon: Icons.brightness_3_outlined,
+                session: AttendanceSession.afternoon,
+                onSelected: widget.onLogAfternoonToday,
               ),
             ],
           ),
@@ -155,13 +143,13 @@ class _TeacherCardState extends State<TeacherCard> {
             Padding(
               padding: const EdgeInsets.only(bottom: 8),
               child: Text(
-                'Older totals were kept, but only new entries show exact dates.',
+                'Older totals were kept, but only new entries show exact dates and sessions.',
                 style: Theme.of(context).textTheme.bodySmall,
               ),
             ),
           if (history.isEmpty)
             Text(
-              'No dated attendance logged yet.',
+              'No attendance sessions logged yet.',
               style: Theme.of(context).textTheme.bodyMedium,
             )
           else ...[
@@ -193,7 +181,7 @@ class _TeacherCardState extends State<TeacherCard> {
                 label: Text(
                   _showAllHistory
                       ? 'Show less'
-                      : 'See more${hiddenHistoryCount > 0 ? ' ($hiddenHistoryCount more days)' : ''}',
+                      : 'See more${hiddenHistoryCount > 0 ? ' ($hiddenHistoryCount more sessions)' : ''}',
                 ),
               ),
             ],
@@ -215,14 +203,79 @@ class _AttendanceEntryChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final backgroundColor = entry.status.color.withValues(alpha: 0.12);
+
     return ActionChip(
+      backgroundColor: backgroundColor,
+      side: BorderSide(
+        color: entry.status.color.withValues(alpha: 0.4),
+      ),
       avatar: Icon(
         entry.status.icon,
         size: 18,
         color: entry.status.color,
       ),
-      label: Text('${formatDate(entry.date)} - ${entry.status.label}'),
+      label: Text(
+        '${formatDate(entry.date)} ${entry.session.shortLabel} - ${entry.status.label}',
+        style: Theme.of(
+          context,
+        ).textTheme.bodyMedium?.copyWith(color: entry.status.color),
+      ),
       onPressed: onTap,
+    );
+  }
+}
+
+class _QuickLogMenuButton extends StatelessWidget {
+  const _QuickLogMenuButton({
+    required this.label,
+    required this.icon,
+    required this.session,
+    required this.onSelected,
+  });
+
+  final String label;
+  final IconData icon;
+  final AttendanceSession session;
+  final ValueChanged<AttendanceStatus> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return PopupMenuButton<AttendanceStatus>(
+      tooltip: 'Log ${session.label.toLowerCase()} attendance for today',
+      onSelected: onSelected,
+      itemBuilder: (context) {
+        return AttendanceStatus.values.map((status) {
+          return PopupMenuItem<AttendanceStatus>(
+            value: status,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(status.icon, size: 18, color: status.color),
+                const SizedBox(width: 8),
+                Text(status.label),
+              ],
+            ),
+          );
+        }).toList(growable: false);
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          border: Border.all(color: Theme.of(context).colorScheme.outline),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 18),
+            const SizedBox(width: 8),
+            Text(label),
+            const SizedBox(width: 6),
+            const Icon(Icons.arrow_drop_down),
+          ],
+        ),
+      ),
     );
   }
 }
