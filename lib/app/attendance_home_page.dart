@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../models/attendance_entry.dart';
@@ -45,10 +46,12 @@ class _AttendanceHomePageState extends State<AttendanceHomePage> {
   bool _isBackingUp = false;
   bool _isSharing = false;
   bool _isLoading = true;
+  String? _appVersionLabel;
 
   @override
   void initState() {
     super.initState();
+    _loadAppVersion();
     _loadTeachers();
   }
 
@@ -72,6 +75,19 @@ class _AttendanceHomePageState extends State<AttendanceHomePage> {
         ..clear()
         ..addAll(teachers);
       _isLoading = false;
+    });
+  }
+
+  Future<void> _loadAppVersion() async {
+    final packageInfo = await PackageInfo.fromPlatform();
+    final versionLabel = 'v${packageInfo.version}+${packageInfo.buildNumber}';
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _appVersionLabel = versionLabel;
     });
   }
 
@@ -542,7 +558,26 @@ class _AttendanceHomePageState extends State<AttendanceHomePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Teacher Attendance')),
+      appBar: AppBar(
+        toolbarHeight: 72,
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Text('Teacher Attendance'),
+            if (_appVersionLabel != null)
+              Text(
+                _appVersionLabel!,
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.onSurface.withValues(alpha: 0.72),
+                      fontWeight: FontWeight.w500,
+                    ),
+              ),
+          ],
+        ),
+      ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : SafeArea(
