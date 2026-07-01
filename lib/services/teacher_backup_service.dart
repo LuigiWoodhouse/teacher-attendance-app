@@ -4,8 +4,10 @@ import 'dart:typed_data';
 import 'package:excel/excel.dart' as xl;
 
 import '../models/attendance_entry.dart';
+import '../models/attendance_period.dart';
 import '../models/attendance_session.dart';
 import '../models/attendance_status.dart';
+import '../models/attendance_term.dart';
 import '../models/teacher_record.dart';
 import '../utils/attendance_date_utils.dart';
 
@@ -27,6 +29,7 @@ class ExcelTeacherBackupService implements TeacherBackupService {
     required DateTime createdAt,
   }) {
     const summarySheetName = 'Teacher Attendance';
+    const periodSheetName = 'Term Summaries';
     const logSheetName = 'Session Log';
     final workbook = xl.Excel.createExcel();
     final defaultSheetName = workbook.getDefaultSheet();
@@ -36,6 +39,7 @@ class ExcelTeacherBackupService implements TeacherBackupService {
     }
 
     final summarySheet = workbook[summarySheetName];
+    final periodSheet = workbook[periodSheetName];
     final logSheet = workbook[logSheetName];
 
     summarySheet.appendRow(<xl.CellValue>[
@@ -50,6 +54,8 @@ class ExcelTeacherBackupService implements TeacherBackupService {
       xl.TextCellValue('Full Name'),
       xl.TextCellValue('First Name'),
       xl.TextCellValue('Last Name'),
+      xl.TextCellValue('Default Year'),
+      xl.TextCellValue('Default Term'),
       xl.TextCellValue('Number of Days Present'),
       xl.TextCellValue('Number of Days Absent'),
       xl.TextCellValue('Number of Days Late'),
@@ -72,6 +78,8 @@ class ExcelTeacherBackupService implements TeacherBackupService {
         xl.TextCellValue(teacher.fullName),
         xl.TextCellValue(teacher.firstName),
         xl.TextCellValue(teacher.lastName),
+        xl.IntCellValue(teacher.currentYear),
+        xl.TextCellValue(teacher.currentTerm.label),
         xl.IntCellValue(teacher.presentDays),
         xl.IntCellValue(teacher.absentDays),
         xl.IntCellValue(teacher.lateDays),
@@ -106,6 +114,62 @@ class ExcelTeacherBackupService implements TeacherBackupService {
       ]);
     }
 
+    periodSheet.appendRow(<xl.CellValue>[
+      xl.TextCellValue(periodSheetName),
+    ]);
+    periodSheet.appendRow(<xl.CellValue>[
+      xl.TextCellValue('Created At'),
+      xl.TextCellValue(formatDateTimeForSheet(createdAt)),
+    ]);
+    periodSheet.appendRow(const <xl.CellValue>[]);
+    periodSheet.appendRow(<xl.CellValue>[
+      xl.TextCellValue('Full Name'),
+      xl.TextCellValue('First Name'),
+      xl.TextCellValue('Last Name'),
+      xl.TextCellValue('Year'),
+      xl.TextCellValue('Term'),
+      xl.TextCellValue('Present'),
+      xl.TextCellValue('Absent'),
+      xl.TextCellValue('Late'),
+      xl.TextCellValue('Holidays'),
+      xl.TextCellValue('Logged Entries'),
+      xl.TextCellValue('Morning Sessions'),
+      xl.TextCellValue('Afternoon Sessions'),
+    ]);
+
+    for (final teacher in teachers) {
+      for (final period in _backupPeriodsForTeacher(teacher)) {
+        periodSheet.appendRow(<xl.CellValue>[
+          xl.TextCellValue(teacher.fullName),
+          xl.TextCellValue(teacher.firstName),
+          xl.TextCellValue(teacher.lastName),
+          xl.IntCellValue(period.year),
+          xl.TextCellValue(period.term.label),
+          xl.IntCellValue(
+            teacher.presentDaysForPeriod(period.year, period.term),
+          ),
+          xl.IntCellValue(
+            teacher.absentDaysForPeriod(period.year, period.term),
+          ),
+          xl.IntCellValue(
+            teacher.lateDaysForPeriod(period.year, period.term),
+          ),
+          xl.IntCellValue(
+            teacher.holidayDaysForPeriod(period.year, period.term),
+          ),
+          xl.IntCellValue(
+            teacher.loggedEntriesForPeriod(period.year, period.term),
+          ),
+          xl.IntCellValue(
+            teacher.morningSessionsForPeriod(period.year, period.term),
+          ),
+          xl.IntCellValue(
+            teacher.afternoonSessionsForPeriod(period.year, period.term),
+          ),
+        ]);
+      }
+    }
+
     logSheet.appendRow(<xl.CellValue>[
       xl.TextCellValue(logSheetName),
     ]);
@@ -118,6 +182,8 @@ class ExcelTeacherBackupService implements TeacherBackupService {
       xl.TextCellValue('Full Name'),
       xl.TextCellValue('First Name'),
       xl.TextCellValue('Last Name'),
+      xl.TextCellValue('Year'),
+      xl.TextCellValue('Term'),
       xl.TextCellValue('Date'),
       xl.TextCellValue('Session'),
       xl.TextCellValue('Status'),
@@ -129,6 +195,8 @@ class ExcelTeacherBackupService implements TeacherBackupService {
           xl.TextCellValue(teacher.fullName),
           xl.TextCellValue(teacher.firstName),
           xl.TextCellValue(teacher.lastName),
+          xl.IntCellValue(entry.year),
+          xl.TextCellValue(entry.term.label),
           xl.TextCellValue(formatDate(entry.date)),
           xl.TextCellValue(entry.session.label),
           xl.TextCellValue(entry.status.label),
@@ -164,6 +232,18 @@ class ExcelTeacherBackupService implements TeacherBackupService {
   }
 }
 
+List<AttendancePeriod> _backupPeriodsForTeacher(TeacherRecord teacher) {
+  final periods = <AttendancePeriod>{
+    teacher.currentPeriod,
+    if (teacher.hasLegacyTotals) teacher.legacyPeriod,
+    for (final entry in teacher.entries)
+      AttendancePeriod(year: entry.year, term: entry.term),
+  }.toList()
+    ..sort(_comparePeriodsAscending);
+
+  return periods;
+}
+
 String _formatEntriesForStatus(TeacherRecord teacher, AttendanceStatus status) {
   final matchingEntries = teacher.entries
       .where((entry) => entry.status == status)
@@ -176,16 +256,37 @@ String _formatEntriesForStatus(TeacherRecord teacher, AttendanceStatus status) {
 
   return matchingEntries
       .map(
-        (entry) => '${formatDate(entry.date)} (${entry.session.label})',
+        (entry) =>
+            '${entry.year} ${entry.term.label} - ${formatDate(entry.date)} '
+            '(${entry.session.label})',
       )
       .join('\n');
 }
 
 int _compareEntriesAscending(AttendanceEntry left, AttendanceEntry right) {
+  final yearCompare = left.year.compareTo(right.year);
+  if (yearCompare != 0) {
+    return yearCompare;
+  }
+
   final dayCompare = left.dayKey.compareTo(right.dayKey);
   if (dayCompare != 0) {
     return dayCompare;
   }
 
+  final termCompare = left.term.sortOrder.compareTo(right.term.sortOrder);
+  if (termCompare != 0) {
+    return termCompare;
+  }
+
   return left.session.sortOrder.compareTo(right.session.sortOrder);
+}
+
+int _comparePeriodsAscending(AttendancePeriod left, AttendancePeriod right) {
+  final yearCompare = left.year.compareTo(right.year);
+  if (yearCompare != 0) {
+    return yearCompare;
+  }
+
+  return left.term.sortOrder.compareTo(right.term.sortOrder);
 }

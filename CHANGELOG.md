@@ -1,3 +1,7 @@
+## 1.2.0+3
+
+- add term tracking for teachers
+
 ## 1.1.0+2
 
 - teachers are now marked twice per day - morning and afternoon

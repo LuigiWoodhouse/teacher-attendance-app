@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 
 import '../models/attendance_entry.dart';
+import '../models/attendance_period.dart';
 import '../models/attendance_session.dart';
 import '../models/attendance_status.dart';
+import '../models/attendance_term.dart';
 import '../models/teacher_record.dart';
 import '../utils/attendance_date_utils.dart';
+import 'year_picker_field.dart';
 
 class TeacherCard extends StatefulWidget {
   const TeacherCard({
@@ -15,6 +18,8 @@ class TeacherCard extends StatefulWidget {
     required this.onLogAttendance,
     required this.onLogMorningToday,
     required this.onLogAfternoonToday,
+    required this.periodOptions,
+    required this.onChangePeriod,
     required this.onEditTeacher,
     required this.onEditEntry,
     required this.onDelete,
@@ -26,6 +31,8 @@ class TeacherCard extends StatefulWidget {
   final VoidCallback onLogAttendance;
   final ValueChanged<AttendanceStatus> onLogMorningToday;
   final ValueChanged<AttendanceStatus> onLogAfternoonToday;
+  final List<AttendancePeriod> periodOptions;
+  final ValueChanged<AttendancePeriod> onChangePeriod;
   final VoidCallback onEditTeacher;
   final ValueChanged<AttendanceEntry> onEditEntry;
   final VoidCallback onDelete;
@@ -41,7 +48,11 @@ class _TeacherCardState extends State<TeacherCard> {
 
   @override
   Widget build(BuildContext context) {
-    final allHistory = widget.teacher.sortedEntries;
+    final selectedPeriod = widget.teacher.currentPeriod;
+    final allHistory = widget.teacher.sortedEntriesForPeriod(
+      selectedPeriod.year,
+      selectedPeriod.term,
+    );
     final hasHiddenHistory = allHistory.length > _collapsedHistoryCount;
     final history = _showAllHistory
         ? allHistory
@@ -97,14 +108,44 @@ class _TeacherCardState extends State<TeacherCard> {
             ],
           ),
           const SizedBox(height: 12),
+          _PeriodPicker(
+            period: selectedPeriod,
+            periodOptions: widget.periodOptions,
+            onSelected: widget.onChangePeriod,
+          ),
+          const SizedBox(height: 12),
           Wrap(
             spacing: 8,
             runSpacing: 8,
             children: [
-              _StatPill(label: 'Present', value: widget.teacher.presentDays),
-              _StatPill(label: 'Absent', value: widget.teacher.absentDays),
-              _StatPill(label: 'Late', value: widget.teacher.lateDays),
-              _StatPill(label: 'Holiday', value: widget.teacher.holidayDays),
+              _StatPill(
+                label: 'Present',
+                value: widget.teacher.presentDaysForPeriod(
+                  selectedPeriod.year,
+                  selectedPeriod.term,
+                ),
+              ),
+              _StatPill(
+                label: 'Absent',
+                value: widget.teacher.absentDaysForPeriod(
+                  selectedPeriod.year,
+                  selectedPeriod.term,
+                ),
+              ),
+              _StatPill(
+                label: 'Late',
+                value: widget.teacher.lateDaysForPeriod(
+                  selectedPeriod.year,
+                  selectedPeriod.term,
+                ),
+              ),
+              _StatPill(
+                label: 'Holiday',
+                value: widget.teacher.holidayDaysForPeriod(
+                  selectedPeriod.year,
+                  selectedPeriod.term,
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 14),
@@ -139,11 +180,14 @@ class _TeacherCardState extends State<TeacherCard> {
                 ),
           ),
           const SizedBox(height: 8),
-          if (widget.teacher.hasLegacyTotals)
+          if (widget.teacher.hasLegacyTotalsForPeriod(
+            selectedPeriod.year,
+            selectedPeriod.term,
+          ))
             Padding(
               padding: const EdgeInsets.only(bottom: 8),
               child: Text(
-                'Older totals were kept, but only new entries show exact dates and sessions.',
+                'Older totals were kept for ${selectedPeriod.label}, but only new entries show exact dates and sessions.',
                 style: Theme.of(context).textTheme.bodySmall,
               ),
             ),
@@ -216,12 +260,185 @@ class _AttendanceEntryChip extends StatelessWidget {
         color: entry.status.color,
       ),
       label: Text(
-        '${formatDate(entry.date)} ${entry.session.shortLabel} - ${entry.status.label}',
+        '${entry.year} ${entry.term.shortLabel} ${formatDate(entry.date)} '
+        '${entry.session.shortLabel} - ${entry.status.label}',
         style: Theme.of(
           context,
         ).textTheme.bodyMedium?.copyWith(color: entry.status.color),
       ),
       onPressed: onTap,
+    );
+  }
+}
+
+class _PeriodPicker extends StatelessWidget {
+  const _PeriodPicker({
+    required this.period,
+    required this.periodOptions,
+    required this.onSelected,
+  });
+
+  final AttendancePeriod period;
+  final List<AttendancePeriod> periodOptions;
+  final ValueChanged<AttendancePeriod> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final yearOptions = periodOptions
+        .map((availablePeriod) => availablePeriod.year)
+        .toSet()
+        .toList(growable: false)
+      ..sort((left, right) => right.compareTo(left));
+
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        _YearPickerButton(
+          selectedYear: period.year,
+          firstYear: yearOptions.last,
+          lastYear: yearOptions.first,
+          onSelected: (year) {
+            onSelected(AttendancePeriod(year: year, term: period.term));
+          },
+        ),
+        _PeriodMenuButton<AttendanceTerm>(
+          tooltip: 'Change term',
+          value: period.term,
+          items: AttendanceTerm.values,
+          labelBuilder: (term) => term.label,
+          onSelected: (term) {
+            onSelected(AttendancePeriod(year: period.year, term: term));
+          },
+        ),
+      ],
+    );
+  }
+}
+
+class _YearPickerButton extends StatelessWidget {
+  const _YearPickerButton({
+    required this.selectedYear,
+    required this.firstYear,
+    required this.lastYear,
+    required this.onSelected,
+  });
+
+  final int selectedYear;
+  final int firstYear;
+  final int lastYear;
+  final ValueChanged<int> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(999),
+      onTap: () async {
+        final pickedYear = await showYearSelectionDialog(
+          context: context,
+          initialYear: selectedYear,
+          firstYear: firstYear,
+          lastYear: lastYear,
+          title: 'Select year',
+        );
+
+        if (pickedYear != null) {
+          onSelected(pickedYear);
+        }
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.primaryContainer,
+          borderRadius: BorderRadius.circular(999),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              selectedYear.toString(),
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                    color: Theme.of(context).colorScheme.onPrimaryContainer,
+                    fontWeight: FontWeight.w600,
+                  ),
+            ),
+            const SizedBox(width: 4),
+            Icon(
+              Icons.calendar_today_outlined,
+              size: 16,
+              color: Theme.of(context).colorScheme.onPrimaryContainer,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PeriodMenuButton<T> extends StatelessWidget {
+  const _PeriodMenuButton({
+    required this.tooltip,
+    required this.value,
+    required this.items,
+    required this.labelBuilder,
+    required this.onSelected,
+  });
+
+  final String tooltip;
+  final T value;
+  final List<T> items;
+  final String Function(T value) labelBuilder;
+  final ValueChanged<T> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return PopupMenuButton<T>(
+      tooltip: tooltip,
+      onSelected: onSelected,
+      itemBuilder: (context) {
+        return items.map((item) {
+          final isSelected = item == value;
+          return PopupMenuItem<T>(
+            value: item,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  isSelected ? Icons.check : Icons.school_outlined,
+                  size: 18,
+                ),
+                const SizedBox(width: 8),
+                Text(labelBuilder(item)),
+              ],
+            ),
+          );
+        }).toList(growable: false);
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.primaryContainer,
+          borderRadius: BorderRadius.circular(999),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              labelBuilder(value),
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                    color: Theme.of(context).colorScheme.onPrimaryContainer,
+                    fontWeight: FontWeight.w600,
+                  ),
+            ),
+            const SizedBox(width: 4),
+            Icon(
+              Icons.arrow_drop_down,
+              size: 18,
+              color: Theme.of(context).colorScheme.onPrimaryContainer,
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../models/attendance_period.dart';
 import '../models/attendance_session.dart';
 import '../models/attendance_status.dart';
 import '../models/teacher_record.dart';
@@ -8,10 +9,12 @@ class TermSummaryTile extends StatelessWidget {
   const TermSummaryTile({
     super.key,
     required this.teacher,
+    required this.period,
     required this.onTapTeacher,
   });
 
   final TeacherRecord teacher;
+  final AttendancePeriod period;
   final VoidCallback onTapTeacher;
 
   @override
@@ -53,10 +56,18 @@ class TermSummaryTile extends StatelessWidget {
                 spacing: 12,
                 runSpacing: 4,
                 children: [
-                  Text('P ${teacher.presentDays}'),
-                  Text('A ${teacher.absentDays}'),
-                  Text('L ${teacher.lateDays}'),
-                  Text('H ${teacher.holidayDays}'),
+                  Text(
+                    'P ${teacher.presentDaysForPeriod(period.year, period.term)}',
+                  ),
+                  Text(
+                    'A ${teacher.absentDaysForPeriod(period.year, period.term)}',
+                  ),
+                  Text(
+                    'L ${teacher.lateDaysForPeriod(period.year, period.term)}',
+                  ),
+                  Text(
+                    'H ${teacher.holidayDaysForPeriod(period.year, period.term)}',
+                  ),
                 ],
               ),
             ],
@@ -69,11 +80,11 @@ class TermSummaryTile extends StatelessWidget {
             ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w600),
           ),
           const SizedBox(height: 8),
-          _SessionBreakdownTable(teacher: teacher),
-          if (teacher.hasLegacyTotals) ...[
+          _SessionBreakdownTable(teacher: teacher, period: period),
+          if (teacher.hasLegacyTotalsForPeriod(period.year, period.term)) ...[
             const SizedBox(height: 8),
             Text(
-              'AM/PM rows cover dated session logs. Older carried totals stay in the summary counts above.',
+              'AM/PM rows cover dated session logs. Older carried totals are kept in ${period.label} counts above.',
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ],
@@ -84,9 +95,13 @@ class TermSummaryTile extends StatelessWidget {
 }
 
 class _SessionBreakdownTable extends StatelessWidget {
-  const _SessionBreakdownTable({required this.teacher});
+  const _SessionBreakdownTable({
+    required this.teacher,
+    required this.period,
+  });
 
   final TeacherRecord teacher;
+  final AttendancePeriod period;
 
   @override
   Widget build(BuildContext context) {
@@ -125,12 +140,14 @@ class _SessionBreakdownTable extends StatelessWidget {
           const SizedBox(height: 8),
           _SessionBreakdownRow(
             label: 'Morning',
+            period: period,
             session: AttendanceSession.morning,
             teacher: teacher,
           ),
           const SizedBox(height: 6),
           _SessionBreakdownRow(
             label: 'Afternoon',
+            period: period,
             session: AttendanceSession.afternoon,
             teacher: teacher,
           ),
@@ -143,11 +160,13 @@ class _SessionBreakdownTable extends StatelessWidget {
 class _SessionBreakdownRow extends StatelessWidget {
   const _SessionBreakdownRow({
     required this.label,
+    required this.period,
     required this.session,
     required this.teacher,
   });
 
   final String label;
+  final AttendancePeriod period;
   final AttendanceSession session;
   final TeacherRecord teacher;
 
@@ -168,7 +187,14 @@ class _SessionBreakdownRow extends StatelessWidget {
           (status) => Expanded(
             child: Center(
               child: Text(
-                teacher.countForSessionAndStatus(session, status).toString(),
+                teacher
+                    .countForPeriodSessionAndStatus(
+                      period.year,
+                      period.term,
+                      session,
+                      status,
+                    )
+                    .toString(),
                 style: Theme.of(context).textTheme.bodyMedium,
               ),
             ),

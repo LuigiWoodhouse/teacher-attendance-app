@@ -7,8 +7,10 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../models/attendance_entry.dart';
+import '../models/attendance_period.dart';
 import '../models/attendance_session.dart';
 import '../models/attendance_status.dart';
+import '../models/attendance_term.dart';
 import '../models/teacher_name_draft.dart';
 import '../models/teacher_record.dart';
 import '../services/teacher_backup_service.dart';
@@ -21,6 +23,7 @@ import '../widgets/empty_states.dart';
 import '../widgets/summary_header.dart';
 import '../widgets/teacher_card.dart';
 import '../widgets/term_summary_tile.dart';
+import '../widgets/year_picker_field.dart';
 
 class AttendanceHomePage extends StatefulWidget {
   const AttendanceHomePage({
@@ -46,6 +49,8 @@ class _AttendanceHomePageState extends State<AttendanceHomePage> {
   bool _isBackingUp = false;
   bool _isSharing = false;
   bool _isLoading = true;
+  int _selectedNewTeacherYear = DateTime.now().year;
+  AttendanceTerm _selectedNewTeacherTerm = AttendanceTerm.term3;
   String? _appVersionLabel;
 
   @override
@@ -111,7 +116,14 @@ class _AttendanceHomePageState extends State<AttendanceHomePage> {
     }
 
     setState(() {
-      _teachers.add(TeacherRecord(firstName: firstName, lastName: lastName));
+      _teachers.add(
+        TeacherRecord(
+          firstName: firstName,
+          lastName: lastName,
+          currentYear: _selectedNewTeacherYear,
+          currentTerm: _selectedNewTeacherTerm,
+        ),
+      );
       _firstNameController.clear();
       _lastNameController.clear();
     });
@@ -146,10 +158,33 @@ class _AttendanceHomePageState extends State<AttendanceHomePage> {
     _showMessage('Teacher name updated.');
   }
 
+  Future<void> _changeTeacherPeriod(
+    int index,
+    AttendancePeriod period,
+  ) async {
+    final teacher = _teachers[index];
+
+    if (teacher.currentPeriod == period) {
+      return;
+    }
+
+    setState(() {
+      _teachers[index] = teacher.copyWith(
+        currentYear: period.year,
+        currentTerm: period.term,
+      );
+    });
+
+    await _saveTeachers();
+    _showMessage('${teacher.fullName} set to ${period.label}.');
+  }
+
   Future<void> _saveAttendanceEntry(
     int teacherIndex, {
     required AttendanceStatus status,
     required DateTime date,
+    required int year,
+    required AttendanceTerm term,
     required AttendanceSession session,
     AttendanceEntry? originalEntry,
   }) async {
@@ -159,6 +194,8 @@ class _AttendanceHomePageState extends State<AttendanceHomePage> {
       _teachers[teacherIndex] = teacher.saveEntry(
         status: status,
         date: date,
+        year: year,
+        term: term,
         session: session,
         originalEntry: originalEntry,
       );
@@ -166,7 +203,8 @@ class _AttendanceHomePageState extends State<AttendanceHomePage> {
 
     await _saveTeachers();
     _showMessage(
-      '${session.label} ${status.label.toLowerCase()} saved for ${formatDate(date)}.',
+      '$year ${term.label} ${session.label.toLowerCase()} '
+      '${status.label.toLowerCase()} saved for ${formatDate(date)}.',
     );
   }
 
@@ -189,11 +227,16 @@ class _AttendanceHomePageState extends State<AttendanceHomePage> {
     AttendanceEntry? existingEntry,
   }) async {
     DateTime selectedDate = existingEntry?.date ?? DateTime.now();
+    int selectedYear =
+        existingEntry?.year ?? _teachers[teacherIndex].currentYear;
+    AttendanceTerm selectedTerm =
+        existingEntry?.term ?? _teachers[teacherIndex].currentTerm;
     AttendanceSession selectedSession =
         existingEntry?.session ?? AttendanceSession.morning;
     AttendanceStatus selectedStatus =
         existingEntry?.status ?? AttendanceStatus.present;
     AttendanceDialogAction? action;
+    final yearOptions = _yearOptions;
 
     await showDialog<void>(
       context: context,
@@ -204,81 +247,118 @@ class _AttendanceHomePageState extends State<AttendanceHomePage> {
               title: Text(
                 existingEntry == null ? 'Log attendance' : 'Edit attendance',
               ),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Day',
-                    style: Theme.of(context).textTheme.labelLarge,
-                  ),
-                  const SizedBox(height: 8),
-                  OutlinedButton.icon(
-                    onPressed: () async {
-                      final pickedDate = await showDatePicker(
-                        context: context,
-                        initialDate: selectedDate,
-                        firstDate: DateTime(2020),
-                        lastDate: DateTime(2100),
-                      );
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Day',
+                      style: Theme.of(context).textTheme.labelLarge,
+                    ),
+                    const SizedBox(height: 8),
+                    OutlinedButton.icon(
+                      onPressed: () async {
+                        final pickedDate = await showDatePicker(
+                          context: context,
+                          initialDate: selectedDate,
+                          firstDate: DateTime(2020),
+                          lastDate: DateTime(2100),
+                        );
 
-                      if (pickedDate == null) {
-                        return;
-                      }
+                        if (pickedDate == null) {
+                          return;
+                        }
 
-                      setDialogState(() {
-                        selectedDate = pickedDate;
-                      });
-                    },
-                    icon: const Icon(Icons.calendar_today_outlined),
-                    label: Text(formatDate(selectedDate)),
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    'Session',
-                    style: Theme.of(context).textTheme.labelLarge,
-                  ),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: AttendanceSession.values.map((session) {
-                      final isSelected = session == selectedSession;
-                      return ChoiceChip(
-                        selected: isSelected,
-                        label: Text(session.label),
-                        onSelected: (_) {
-                          setDialogState(() {
-                            selectedSession = session;
-                          });
-                        },
-                      );
-                    }).toList(growable: false),
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    'Status',
-                    style: Theme.of(context).textTheme.labelLarge,
-                  ),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: AttendanceStatus.values.map((status) {
-                      final isSelected = status == selectedStatus;
-                      return ChoiceChip(
-                        selected: isSelected,
-                        label: Text(status.label),
-                        avatar: Icon(status.icon, size: 18),
-                        onSelected: (_) {
-                          setDialogState(() {
-                            selectedStatus = status;
-                          });
-                        },
-                      );
-                    }).toList(growable: false),
-                  ),
-                ],
+                        setDialogState(() {
+                          selectedDate = pickedDate;
+                        });
+                      },
+                      icon: const Icon(Icons.calendar_today_outlined),
+                      label: Text(formatDate(selectedDate)),
+                    ),
+                    const SizedBox(height: 16),
+                    YearPickerField(
+                      key: ValueKey('attendance-year-$selectedYear'),
+                      selectedYear: selectedYear,
+                      firstYear: yearOptions.last,
+                      lastYear: yearOptions.first,
+                      dialogTitle: 'Select attendance year',
+                      onChanged: (year) {
+                        setDialogState(() {
+                          selectedYear = year;
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Term',
+                      style: Theme.of(context).textTheme.labelLarge,
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: AttendanceTerm.values.map((term) {
+                        final isSelected = term == selectedTerm;
+                        return ChoiceChip(
+                          selected: isSelected,
+                          label: Text(term.label),
+                          onSelected: (_) {
+                            setDialogState(() {
+                              selectedTerm = term;
+                            });
+                          },
+                        );
+                      }).toList(growable: false),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Session',
+                      style: Theme.of(context).textTheme.labelLarge,
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: AttendanceSession.values.map((session) {
+                        final isSelected = session == selectedSession;
+                        return ChoiceChip(
+                          selected: isSelected,
+                          label: Text(session.label),
+                          onSelected: (_) {
+                            setDialogState(() {
+                              selectedSession = session;
+                            });
+                          },
+                        );
+                      }).toList(growable: false),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Status',
+                      style: Theme.of(context).textTheme.labelLarge,
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: AttendanceStatus.values.map((status) {
+                        final isSelected = status == selectedStatus;
+                        return ChoiceChip(
+                          selected: isSelected,
+                          label: Text(status.label),
+                          avatar: Icon(status.icon, size: 18),
+                          onSelected: (_) {
+                            setDialogState(() {
+                              selectedStatus = status;
+                            });
+                          },
+                        );
+                      }).toList(growable: false),
+                    ),
+                  ],
+                ),
               ),
               actions: [
                 if (existingEntry != null)
@@ -320,6 +400,8 @@ class _AttendanceHomePageState extends State<AttendanceHomePage> {
       teacherIndex,
       status: selectedStatus,
       date: selectedDate,
+      year: selectedYear,
+      term: selectedTerm,
       session: selectedSession,
       originalEntry: existingEntry,
     );
@@ -331,26 +413,41 @@ class _AttendanceHomePageState extends State<AttendanceHomePage> {
     AttendanceStatus status,
   ) async {
     final teacher = _teachers[teacherIndex];
+    final period = teacher.currentPeriod;
     final today = DateTime.now();
-    final existingEntry = _entryForDateAndSession(teacher, today, session);
+    final existingEntry = _entryForDatePeriodAndSession(
+      teacher,
+      today,
+      period.year,
+      period.term,
+      session,
+    );
 
     await _saveAttendanceEntry(
       teacherIndex,
       status: status,
       date: today,
+      year: period.year,
+      term: period.term,
       session: session,
       originalEntry: existingEntry,
     );
   }
 
-  AttendanceEntry? _entryForDateAndSession(
+  AttendanceEntry? _entryForDatePeriodAndSession(
     TeacherRecord teacher,
     DateTime date,
+    int year,
+    AttendanceTerm term,
     AttendanceSession session,
   ) {
     final dayKey = dateKey(date);
     return teacher.entries.cast<AttendanceEntry?>().firstWhere(
-          (entry) => entry?.dayKey == dayKey && entry?.session == session,
+          (entry) =>
+              entry?.dayKey == dayKey &&
+              entry?.year == year &&
+              entry?.term == term &&
+              entry?.session == session,
           orElse: () => null,
         );
   }
@@ -543,17 +640,88 @@ class _AttendanceHomePageState extends State<AttendanceHomePage> {
     }
   }
 
-  int get _totalPresent =>
-      _teachers.fold(0, (sum, teacher) => sum + teacher.presentDays);
+  int get _totalPresent => _teachers.fold(
+        0,
+        (sum, teacher) =>
+            sum +
+            teacher.presentDaysForPeriod(
+              teacher.currentYear,
+              teacher.currentTerm,
+            ),
+      );
 
-  int get _totalAbsent =>
-      _teachers.fold(0, (sum, teacher) => sum + teacher.absentDays);
+  int get _totalAbsent => _teachers.fold(
+        0,
+        (sum, teacher) =>
+            sum +
+            teacher.absentDaysForPeriod(
+              teacher.currentYear,
+              teacher.currentTerm,
+            ),
+      );
 
-  int get _totalLate =>
-      _teachers.fold(0, (sum, teacher) => sum + teacher.lateDays);
+  int get _totalLate => _teachers.fold(
+        0,
+        (sum, teacher) =>
+            sum +
+            teacher.lateDaysForPeriod(
+              teacher.currentYear,
+              teacher.currentTerm,
+            ),
+      );
 
-  int get _totalHoliday =>
-      _teachers.fold(0, (sum, teacher) => sum + teacher.holidayDays);
+  int get _totalHoliday => _teachers.fold(
+        0,
+        (sum, teacher) =>
+            sum +
+            teacher.holidayDaysForPeriod(
+              teacher.currentYear,
+              teacher.currentTerm,
+            ),
+      );
+
+  List<int> get _yearOptions {
+    final currentYear = DateTime.now().year;
+    final years = <int>{
+      for (var year = 2020; year <= currentYear + 1; year += 1) year,
+      _selectedNewTeacherYear,
+      ..._teachers.map((teacher) => teacher.currentYear),
+      ..._teachers.map((teacher) => teacher.legacyYear),
+      for (final teacher in _teachers)
+        ...teacher.entries.map((entry) => entry.year),
+    }.toList()
+      ..sort((left, right) => right.compareTo(left));
+
+    return years;
+  }
+
+  List<AttendancePeriod> get _periodOptions {
+    return <AttendancePeriod>[
+      for (final year in _yearOptions)
+        for (final term in AttendanceTerm.values)
+          AttendancePeriod(year: year, term: term),
+    ];
+  }
+
+  List<AttendancePeriod> get _summaryPeriods {
+    final years = <int>{
+      _selectedNewTeacherYear,
+      for (final teacher in _teachers) teacher.currentYear,
+      for (final teacher in _teachers)
+        if (teacher.hasLegacyTotals) teacher.legacyYear,
+      for (final teacher in _teachers)
+        for (final entry in teacher.entries) entry.year,
+    };
+
+    final periods = <AttendancePeriod>{
+      for (final year in years)
+        for (final term in AttendanceTerm.values)
+          AttendancePeriod(year: year, term: term),
+    }.toList()
+      ..sort(_comparePeriodsAscending);
+
+    return periods;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -606,6 +774,19 @@ class _AttendanceHomePageState extends State<AttendanceHomePage> {
                     AddTeacherForm(
                       firstNameController: _firstNameController,
                       lastNameController: _lastNameController,
+                      yearOptions: _yearOptions,
+                      selectedYear: _selectedNewTeacherYear,
+                      onYearChanged: (year) {
+                        setState(() {
+                          _selectedNewTeacherYear = year;
+                        });
+                      },
+                      selectedTerm: _selectedNewTeacherTerm,
+                      onTermChanged: (term) {
+                        setState(() {
+                          _selectedNewTeacherTerm = term;
+                        });
+                      },
                       onAddTeacher: _addTeacher,
                     ),
                     const SizedBox(height: 16),
@@ -641,6 +822,11 @@ class _AttendanceHomePageState extends State<AttendanceHomePage> {
                               AttendanceSession.afternoon,
                               status,
                             ),
+                            periodOptions: _periodOptions,
+                            onChangePeriod: (period) => _changeTeacherPeriod(
+                              index,
+                              period,
+                            ),
                             onEditTeacher: () => _editTeacherName(index),
                             onEditEntry: (entry) => _openAttendanceDialog(
                               index,
@@ -651,24 +837,21 @@ class _AttendanceHomePageState extends State<AttendanceHomePage> {
                         ),
                       ),
                     const SizedBox(height: 8),
-                    Text(
-                      'End of term summary',
-                      style: Theme.of(context).textTheme.titleLarge,
-                    ),
-                    const SizedBox(height: 12),
-                    if (_teachers.isEmpty)
-                      const SummaryPlaceholder()
-                    else
-                      ...List.generate(
-                        _teachers.length,
-                        (index) => Padding(
-                          padding: const EdgeInsets.only(bottom: 10),
-                          child: TermSummaryTile(
-                            teacher: _teachers[index],
-                            onTapTeacher: () => _scrollToTeacherCard(index),
-                          ),
-                        ),
+                    ...(_summaryPeriods.isEmpty
+                            ? <AttendancePeriod>[
+                                AttendancePeriod(
+                                  year: _selectedNewTeacherYear,
+                                  term: _selectedNewTeacherTerm,
+                                ),
+                              ]
+                            : _summaryPeriods)
+                        .map(
+                      (period) => _TermSummarySection(
+                        period: period,
+                        teachers: _teachers,
+                        onTapTeacher: _scrollToTeacherCard,
                       ),
+                    ),
                   ],
                 ),
               ),
@@ -680,4 +863,62 @@ class _AttendanceHomePageState extends State<AttendanceHomePage> {
 enum AttendanceDialogAction {
   save,
   delete,
+}
+
+class _TermSummarySection extends StatelessWidget {
+  const _TermSummarySection({
+    required this.period,
+    required this.teachers,
+    required this.onTapTeacher,
+  });
+
+  final AttendancePeriod period;
+  final List<TeacherRecord> teachers;
+  final ValueChanged<int> onTapTeacher;
+
+  @override
+  Widget build(BuildContext context) {
+    final matchingTeachers = <({int index, TeacherRecord teacher})>[];
+
+    for (var index = 0; index < teachers.length; index += 1) {
+      final teacher = teachers[index];
+      if (teacher.shouldShowInPeriodSummary(period.year, period.term)) {
+        matchingTeachers.add((index: index, teacher: teacher));
+      }
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          period.summaryLabel,
+          style: Theme.of(context).textTheme.titleLarge,
+        ),
+        const SizedBox(height: 12),
+        if (teachers.isEmpty || matchingTeachers.isEmpty)
+          const SummaryPlaceholder()
+        else
+          ...matchingTeachers.map(
+            (item) => Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: TermSummaryTile(
+                teacher: item.teacher,
+                period: period,
+                onTapTeacher: () => onTapTeacher(item.index),
+              ),
+            ),
+          ),
+        const SizedBox(height: 8),
+      ],
+    );
+  }
+}
+
+int _comparePeriodsAscending(AttendancePeriod left, AttendancePeriod right) {
+  final yearCompare = left.year.compareTo(right.year);
+  if (yearCompare != 0) {
+    return yearCompare;
+  }
+
+  return left.term.sortOrder.compareTo(right.term.sortOrder);
 }
